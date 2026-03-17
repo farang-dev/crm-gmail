@@ -1,0 +1,67 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Contact {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  name      String?
+  company   String?
+  tags      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  emails    EmailRecipient[]
+}
+
+model Campaign {
+  id          String   @id @default(uuid())
+  name        String
+  subject     String
+  bodyHtml    String
+  bodyText    String?
+  status      String   @default("draft")
+  totalCount  Int      @default(0)
+  sentCount   Int      @default(0)
+  openCount   Int      @default(0)
+  failedCount Int      @default(0)
+  scheduledAt DateTime?
+  sentAt      DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  emails      EmailRecipient[]
+}
+
+model EmailRecipient {
+  id         String   @id @default(uuid())
+  campaignId String
+  contactId  String
+  status     String   @default("pending")
+  openedAt   DateTime?
+  openCount  Int      @default(0)
+  sentAt     DateTime?
+  errorMsg   String?
+  trackingId String   @unique @default(uuid())
+  createdAt  DateTime @default(now())
+  
+  campaign   Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  contact    Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  
+  @@index([campaignId])
+  @@index([contactId])
+  @@index([trackingId])
+  @@unique([campaignId, contactId], name: "campaignId_contactId")
+}
+
+model Settings {
+  id            String @id @default("default")
+  gmailAddress  String @default("")
+  gmailAppPassword String @default("")
+  senderName    String @default("")
+  dailyLimit    Int    @default(500)
+  delayBetween  Int    @default(2)
+}

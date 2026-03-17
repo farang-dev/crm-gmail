@@ -1,36 +1,58 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Gmail CRM (Local)
 
-## Getting Started
+A modern, local-first CRM for bulk sending emails via Gmail SMTP with open tracking and campaign analytics.
 
-First, run the development server:
+## Features
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+- **Gmail SMTP Integration**: Send emails securely using Google App Passwords.
+- **Bulk Contact Import**: Smart parser for pasting data directly from spreadsheets (Excel, Google Sheets).
+- **Campaign Management**: Draft campaigns with HTML support and select specific recipients.
+- **Analytics Dashboard**: Real-time tracking of sent emails and open rates via tracking pixels.
+- **Local Database**: Powered by SQLite - no external database setup required.
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Quick Start
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+1. **Install dependencies**:
+   ```bash
+   npm install
+   ```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+2. **Setup Database**:
+   ```bash
+   npx prisma db push
+   ```
 
-## Learn More
+3. **Start Development Server**:
+   ```bash
+   npm run dev
+   ```
 
-To learn more about Next.js, take a look at the following resources:
+4. **Configure Gmail**:
+   - Go to [Settings](http://localhost:3000/settings) in the app.
+   - Enter your Gmail address.
+   - Generate and enter a [Google App Password](https://myaccount.google.com/apppasswords).
+   - Test the connection.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Usage Guide
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### 1. Adding Contacts
+Navigate to the **Contacts** tab. Click **Import (Paste Text)** and paste your contact list from a spreadsheet. The system will automatically extract emails and names.
 
-## Deploy on Vercel
+### 2. Creating a Campaign
+Go to **Campaigns** -> **New Campaign**. Write your subject and HTML body. Save the draft.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+### 3. Sending
+Open your draft campaign, select the contacts you want to message, and hit **Send**. The system will send emails with a configured delay to stay within Gmail's limits.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+### 4. Tracking
+Once sent, the campaign details page will show which recipients have opened the email.
+
+## Tech Stack
+
+- **Framework**: Next.js (App Router)
+- **Database**: SQLite + Prisma
+- **Email**: Nodemailer
+- **UI**: Vanilla CSS (Glassmorphism design)
+
+---
+*Note: This application is intended for local use. Standard Gmail accounts have a limit of 500 emails per 24 hours.*
