@@ -16,29 +16,50 @@ export async function GET(
     });
 
     if (recipient) {
-      // Update open tracking
-      const isFirstOpen = !recipient.openedAt;
-      
-      await prisma.emailRecipient.update({
-        where: { trackingId },
-        data: {
-          openedAt: recipient.openedAt || new Date(),
-          openCount: { increment: 1 },
-        },
-      });
+      const ua = req.headers.get('user-agent') || '';
+      const ip = req.headers.get('x-forwarded-for') || 'unknown';
+      const now = new Date();
 
-      // Update campaign open count on first open
-      if (isFirstOpen) {
-        await prisma.campaign.update({
-          where: { id: recipient.campaignId },
-          data: {
-            openCount: { increment: 1 },
-          },
+      // BOT DETECTION (MailChimp style)
+      // Filters out corporate scanners that open emails automatically, 
+      // but ALLOWS GoogleImageProxy because that's how Gmail identifies human opens.
+      const isBot = /Mimecast|Proofpoint|Datadog|Bot|Crawl|Spider/i.test(ua);
+      
+      // RATE LIMITING (Throttling)
+      // Prevent double-counting from quick double-clicks or browser refreshes
+      const lastUpdate = recipient.sentAt ? recipient.sentAt.getTime() : 0; // Use sentAt as fallback if never opened
+      const timeSinceLast = recipient.openedAt ? now.getTime() - recipient.openedAt.getTime() : 99999;
+      
+      const shouldTrack = !isBot && timeSinceLast > 1000; // 1 second throttle
+
+      if (shouldTrack) {
+        const isFirstOpen = !recipient.openedAt;
+
+        await prisma.$transaction(async (tx) => {
+          await tx.emailRecipient.update({
+            where: { trackingId },
+            data: {
+              openedAt: recipient.openedAt || now,
+              openCount: { increment: 1 },
+            },
+          });
+
+          // Only increment campaign unique open count once
+          if (isFirstOpen) {
+            await tx.campaign.update({
+              where: { id: recipient.campaignId },
+              data: {
+                openCount: { increment: 1 },
+              },
+            });
+          }
         });
+        
+        console.log(`[TRACK] Opened: ${recipient.contactId} (UA: ${ua.substring(0, 30)}...)`);
       }
     }
-  } catch (e) {
-    console.error('Tracking error:', e);
+  } catch (e: any) {
+    console.error('Tracking error:', e.message);
   }
 
   // Return 1x1 transparent PNG

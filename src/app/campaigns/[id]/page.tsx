@@ -21,12 +21,11 @@ export default function CampaignDetailsPage({
   useEffect(() => {
     Promise.all([
       fetch(`/api/campaigns/${resolvedParams.id}`).then(res => res.json()),
-      fetch('/api/contacts?limit=1000').then(res => res.json()) // Get full list for selection
+      fetch('/api/contacts?limit=1000').then(res => res.json())
     ]).then(([campData, contData]) => {
       setCampaign(campData);
       setContacts(contData.contacts || []);
       
-      // Pre-select contacts if they are already in the campaign draft
       if (campData.status === 'draft' && campData.emails) {
         const preselected = new Set<string>(campData.emails.map((e: any) => e.contactId));
         setSelectedContacts(preselected);
@@ -107,10 +106,14 @@ export default function CampaignDetailsPage({
   };
 
   const toggleAll = () => {
-    if (selectedContacts.size === filteredContacts.length) {
+    const filtered = contacts.filter(c => 
+      c.email.toLowerCase().includes(search.toLowerCase()) || 
+      (c.name && c.name.toLowerCase().includes(search.toLowerCase()))
+    );
+    if (selectedContacts.size === filtered.length) {
       setSelectedContacts(new Set());
     } else {
-      setSelectedContacts(new Set(filteredContacts.map(c => c.id)));
+      setSelectedContacts(new Set(filtered.map(c => c.id)));
     }
   };
 
@@ -123,15 +126,14 @@ export default function CampaignDetailsPage({
   );
 
   const isDraft = campaign.status === 'draft';
-  const openRate = campaign.sentCount > 0 ? ((campaign.openCount / campaign.sentCount) * 100).toFixed(1) : 0;
 
   return (
     <div className="animate-fade-in">
       <div className="page-header" style={{ marginBottom: '1rem' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
           <h1 className="page-title">{campaign.name}</h1>
-          <span className={`badge badge-${campaign.status}`} style={{ fontSize: '1rem', padding: '0.25rem 1rem' }}>
-            {campaign.status.toUpperCase()}
+          <span className={`badge badge-${campaign?.status || 'draft'}`} style={{ fontSize: '1rem', padding: '0.25rem 1rem' }}>
+            {String(campaign?.status || 'DRAFT').toUpperCase()}
           </span>
         </div>
         {(campaign.status === 'draft' || campaign.status === 'failed') && (
@@ -166,25 +168,29 @@ export default function CampaignDetailsPage({
         <>
           <div style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(4, 1fr)',
+            gridTemplateColumns: 'repeat(5, 1fr)',
             gap: '1rem',
             marginBottom: '2rem'
           }}>
             <div className="card" style={{ padding: '1rem' }}>
-              <div style={{ fontSize: '0.875rem', color: 'var(--muted-foreground)' }}>Target Recipients</div>
+              <div style={{ fontSize: '0.875rem', color: 'var(--muted-foreground)' }}>Recipients</div>
               <div style={{ fontSize: '1.5rem', fontWeight: 700 }}>{campaign.totalCount}</div>
             </div>
             <div className="card" style={{ padding: '1rem' }}>
-              <div style={{ fontSize: '0.875rem', color: 'var(--muted-foreground)' }}>Dispatched (to Gmail)</div>
+              <div style={{ fontSize: '0.875rem', color: 'var(--muted-foreground)' }}>Dispatched</div>
               <div style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--success)' }}>{campaign.sentCount}</div>
             </div>
             <div className="card" style={{ padding: '1rem' }}>
-              <div style={{ fontSize: '0.875rem', color: 'var(--muted-foreground)' }}>Confirmed Opened</div>
-              <div style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--primary)' }}>{campaign.openCount}</div>
+              <div style={{ fontSize: '0.875rem', color: 'var(--muted-foreground)' }}>Total Opens</div>
+              <div style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--primary)' }}>{campaign.totalOpenCount || 0}</div>
             </div>
             <div className="card" style={{ padding: '1rem' }}>
-              <div style={{ fontSize: '0.875rem', color: 'var(--muted-foreground)' }}>Confirmed Reach Rate</div>
-              <div style={{ fontSize: '1.5rem', fontWeight: 700 }}>{openRate}%</div>
+              <div style={{ fontSize: '0.875rem', color: 'var(--muted-foreground)' }}>Unique Opens</div>
+              <div style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--primary)' }}>{campaign.uniqueOpenCount || 0}</div>
+            </div>
+            <div className="card" style={{ padding: '1rem' }}>
+              <div style={{ fontSize: '0.875rem', color: 'var(--muted-foreground)' }}>Open Rate</div>
+              <div style={{ fontSize: '1.5rem', fontWeight: 700 }}>{campaign.sentCount > 0 ? ((campaign.uniqueOpenCount / campaign.sentCount) * 100).toFixed(1) : 0}%</div>
             </div>
           </div>
 
@@ -206,8 +212,9 @@ export default function CampaignDetailsPage({
                 </thead>
                 <tbody>
                   {Object.entries(
-                    campaign.emails.reduce((acc: any, e: any) => {
-                      const domain = e.contact.email.split('@')[1];
+                    (campaign.emails || []).reduce((acc: any, e: any) => {
+                      const domain = e.contact?.email?.split('@')[1];
+                      if (!domain) return acc;
                       if (!acc[domain]) acc[domain] = { sent: 0, opened: 0 };
                       if (e.status === 'sent') acc[domain].sent++;
                       if (e.openedAt) acc[domain].opened++;
@@ -320,7 +327,7 @@ export default function CampaignDetailsPage({
         <div className="card" style={{ marginBottom: '2rem' }}>
           <h2 style={{ fontSize: '1.25rem', fontWeight: 600, marginBottom: '1rem' }}>Recipient Status</h2>
           
-          {campaign.emails.some((e: any) => e.errorMsg?.includes('550') || e.errorMsg?.toLowerCase().includes('unknown')) && (
+          {(campaign.emails || []).some((e: any) => (e.errorMsg || '').includes('550') || (e.errorMsg || '').toLowerCase().includes('unknown')) && (
             <div style={{ 
               backgroundColor: 'rgba(239, 68, 68, 0.1)', 
               border: '1px solid var(--destructive)', 
@@ -342,8 +349,8 @@ export default function CampaignDetailsPage({
                 className="btn btn-destructive" 
                 onClick={async () => {
                   if (!confirm('Remove these invalid emails from your master contact list?')) return;
-                  const invalidIds = campaign.emails
-                    .filter((e: any) => e.errorMsg?.includes('550') || e.errorMsg?.toLowerCase().includes('unknown'))
+                  const invalidIds = (campaign.emails || [])
+                    .filter((e: any) => (e.errorMsg || '').includes('550') || (e.errorMsg || '').toLowerCase().includes('unknown'))
                     .map((e: any) => e.contactId);
                   
                   try {
@@ -376,8 +383,8 @@ export default function CampaignDetailsPage({
                 </tr>
               </thead>
               <tbody>
-                {campaign.emails.map((e: any) => {
-                  const isPermanentFail = e.errorMsg?.includes('550') || e.errorMsg?.toLowerCase().includes('unknown');
+                {(campaign.emails || []).map((e: any) => {
+                  const isPermanentFail = (e.errorMsg || '').includes('550') || (e.errorMsg || '').toLowerCase().includes('unknown');
                   return (
                     <tr key={e.id}>
                       <td>{e.contact.email}</td>

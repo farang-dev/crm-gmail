@@ -129,11 +129,63 @@ export default function ContactsPage() {
     }
   };
 
+  const handleExport = async () => {
+    try {
+      // Fetch ALL contacts for export (no limit)
+      const res = await fetch('/api/contacts?limit=10000');
+      const data = await res.json();
+      const allContacts = data.contacts || [];
+
+      if (allContacts.length === 0) {
+        alert('No contacts to export');
+        return;
+      }
+
+      // CSV Header
+      const headers = ['Email', 'Name', 'Company', 'Created At', 'Emails Sent'];
+      
+      // Map rows
+      const rows = allContacts.map((c: any) => [
+        c.email,
+        c.name || '',
+        c.company || '',
+        new Date(c.createdAt).toLocaleDateString(),
+        c._count?.emails || 0
+      ]);
+
+      // Combine into CSV string
+      const csvContent = [
+        headers.join(','),
+        ...rows.map((r: any[]) => r.map(val => `"${String(val).replace(/"/g, '""')}"`).join(','))
+      ].join('\n');
+
+      // Add BOM for Excel UTF-8 compatibility (important for Japanese chars)
+      const BOM = '\uFEFF';
+      const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
+      
+      // Trigger download
+      const link = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      link.setAttribute('href', url);
+      link.setAttribute('download', `contacts_export_${new Date().toISOString().split('T')[0]}.csv`);
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (err) {
+      console.error('Export failed:', err);
+      alert('Failed to export contacts');
+    }
+  };
+
   return (
     <div className="animate-fade-in">
       <div className="page-header">
         <h1 className="page-title">Contacts</h1>
         <div style={{ display: 'flex', gap: '1rem' }}>
+          <button className="btn btn-secondary" onClick={handleExport}>
+            Export to Excel
+          </button>
           <button className="btn btn-secondary" onClick={() => setIsImportModalOpen(true)}>
             Import (Paste Text)
           </button>

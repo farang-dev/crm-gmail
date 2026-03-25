@@ -25,7 +25,19 @@ export async function GET(
     return NextResponse.json({ error: 'Campaign not found' }, { status: 404 });
   }
 
-  return NextResponse.json(campaign);
+  // Compute aggregated stats on the fly for definitive accuracy
+  const uniqueOpenCount = campaign.emails.filter((e: any) => e.openedAt !== null).length;
+  const totalOpenCount = campaign.emails.reduce((sum: number, e: any) => sum + (e.openCount || 0), 0);
+  const sentCount = campaign.emails.filter((e: any) => e.status === 'sent').length;
+  const failedCount = campaign.emails.filter((e: any) => e.status === 'failed').length;
+
+  return NextResponse.json({
+    ...campaign,
+    uniqueOpenCount,
+    totalOpenCount,
+    sentCount, 
+    failedCount,
+  });
 }
 
 export async function PUT(

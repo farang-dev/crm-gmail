@@ -60,12 +60,15 @@ export async function sendSingleEmail({
     finalHtml = html + trackingPixel;
   }
 
-  const mailOptions = {
-    from: cleanFrom, // Pure email address only (Gmass style)
+  const mailOptions: any = {
+    from: senderName ? `"${senderName}" <${cleanFrom}>` : cleanFrom,
     to: cleanTo,
     subject: subject.trim(),
     html: finalHtml,
-    // Removed 'text' alternative to keep the email structure as simple as possible
+    text: text || subject.trim(), // CRITICAL: Missing text equivalent is a major spam trigger
+    headers: {
+      'X-Mailer': undefined, // Removed identifying bot header
+    },
   };
 
   return transporter.sendMail(mailOptions);
