@@ -6,10 +6,17 @@ export const dynamic = 'force-dynamic';
 
 /**
  * Worker function to process a single campaign's emails.
- * Now refactored to support sequential queueing.
+ * Refactored to handle Gmail daily limits and error-based stopping.
  */
 async function runCampaignWorker(campaignId: string, baseUrl: string) {
   try {
+    const settings = await prisma.settings.findUnique({ where: { id: 'default' } });
+    if (!settings || !settings.gmailAddress || !settings.gmailAppPassword) {
+      console.error('[Worker] Gmail settings missing');
+      await prisma.campaign.update({ where: { id: campaignId }, data: { status: 'failed' } });
+      return;
+    }
+
     const campaign = await prisma.campaign.findUnique({ 
       where: { id: campaignId },
       include: {
@@ -22,20 +29,34 @@ async function runCampaignWorker(campaignId: string, baseUrl: string) {
 
     if (!campaign || campaign.status !== 'sending') return;
 
-    const settings = await prisma.settings.findUnique({ where: { id: 'default' } });
-    if (!settings || !settings.gmailAddress || !settings.gmailAppPassword) {
-      console.error('[Worker] Gmail settings missing');
-      await prisma.campaign.update({ where: { id: campaignId }, data: { status: 'failed' } });
-      return;
-    }
-
-    console.log(`[Worker] Starting sequential processing for Campaign: ${campaign.name}`);
+    console.log(`[Worker] Started Campaign: ${campaign.name}. Pending: ${campaign.emails.length}`);
 
     for (const recipient of campaign.emails) {
-      // Re-fetch to check if user cancelled or status changed
+      // 1. RE-CHECK STATUS (In case of manual cancel)
       const currentCamp = await prisma.campaign.findUnique({ where: { id: campaignId } });
       if (!currentCamp || currentCamp.status !== 'sending') break;
 
+      // 2. SAFEGUARD: DAILY LIMIT CHECK
+      const startOfDay = new Date();
+      startOfDay.setHours(0, 0, 0, 0);
+      
+      const sentToday = await prisma.emailRecipient.count({
+        where: {
+          status: 'sent',
+          sentAt: { gte: startOfDay }
+        }
+      });
+
+      if (sentToday >= (settings.dailyLimit || 500)) {
+        console.warn(`[Worker] SAFEGUARD: Daily limit reached (${sentToday}). Pausing campaign.`);
+        await prisma.campaign.update({
+          where: { id: campaignId },
+          data: { status: 'waiting' } // Move back to queue
+        });
+        return; // EXIT loop and worker
+      }
+
+      // 3. ATTEMPT SEND
       try {
         await sendSingleEmail({
           to: recipient.contact.email,
@@ -54,9 +75,24 @@ async function runCampaignWorker(campaignId: string, baseUrl: string) {
           data: { status: 'sent', sentAt: new Date() },
         });
       } catch (e: any) {
+        const errorMsg = e.message || 'Unknown error';
+        
+        // 4. PANIC STOP: DETECT RATE LIMITING
+        const isRateLimited = errorMsg.includes('limit exceeded') || errorMsg.includes('550 5.4.5');
+        
+        if (isRateLimited) {
+          console.error(`[Worker] PANIC: Gmail reported limit exceeded. Stopping immediately.`);
+          await prisma.campaign.update({
+            where: { id: campaignId },
+            data: { status: 'waiting' } // Don't mark failed, just wait for next day
+          });
+          return; // STOP THE ENTIRE WORKER
+        }
+
+        // Generic error: match individual failure and continue to next person
         await prisma.emailRecipient.update({
           where: { id: recipient.id },
-          data: { status: 'failed', errorMsg: e.message || 'Unknown error' },
+          data: { status: 'failed', errorMsg },
         });
       }
 
@@ -78,33 +114,26 @@ async function runCampaignWorker(campaignId: string, baseUrl: string) {
 
     // Finalize current campaign
     const finalTotal = await prisma.emailRecipient.count({ where: { campaignId } });
+    const finalPending = await prisma.emailRecipient.count({ where: { campaignId, status: 'pending' } });
     const finalFailed = await prisma.emailRecipient.count({ where: { campaignId, status: 'failed' } });
     
-    await prisma.campaign.update({
-      where: { id: campaignId },
-      data: {
-        status: finalFailed === finalTotal ? 'failed' : 'sent',
-      },
-    });
-
-    console.log(`[Worker] Finished Campaign: ${campaign.name}. Checking for next in queue...`);
-
-    // QUEUE LOGIC: Trigger next waiting campaign
-    const nextWaiting = await prisma.campaign.findFirst({
-      where: { status: 'waiting' },
-      orderBy: { sentAt: 'asc' } // Start the one that clicked send first
-    });
-
-    if (nextWaiting) {
-      console.log(`[Worker] Found waiting campaign: ${nextWaiting.name}. Automatic start.`);
+    // Only mark DONE if nothing is pending
+    if (finalPending === 0) {
       await prisma.campaign.update({
-        where: { id: nextWaiting.id },
-        data: { status: 'sending' }
+        where: { id: campaignId },
+        data: { status: finalFailed === finalTotal ? 'failed' : 'sent' },
       });
-      // Recursive call to process next
-      await runCampaignWorker(nextWaiting.id, baseUrl);
-    } else {
-      console.log('[Worker] Queue empty. All campaigns processed.');
+
+      // QUEUE LOGIC: Trigger next waiting campaign
+      const nextWaiting = await prisma.campaign.findFirst({
+        where: { status: 'waiting' },
+        orderBy: { sentAt: 'asc' }
+      });
+
+      if (nextWaiting) {
+        await prisma.campaign.update({ where: { id: nextWaiting.id }, data: { status: 'sending' } });
+        await runCampaignWorker(nextWaiting.id, baseUrl);
+      }
     }
 
   } catch (err) {
@@ -132,7 +161,7 @@ export async function POST(
       return NextResponse.json({ error: 'Campaign not found' }, { status: 404 });
     }
 
-    // Setup recipients as pending
+    // Prepare recipients
     for (const contactId of contactIds) {
       await prisma.emailRecipient.upsert({
         where: { campaignId_contactId: { campaignId: id, contactId } },
@@ -141,32 +170,23 @@ export async function POST(
       });
     }
 
-    // Check if another campaign is already sending
-    const activeCampaign = await prisma.campaign.findFirst({
-      where: { status: 'sending' }
-    });
-
+    // Start or Queue
+    const activeCampaign = await prisma.campaign.findFirst({ where: { status: 'sending' } });
     const protocol = req.headers.get('x-forwarded-proto') || 'http';
     const host = req.headers.get('host') || 'localhost:3000';
     const baseUrl = `${protocol}://${host}`;
 
     if (activeCampaign && activeCampaign.id !== id) {
-      // QUEUE IT: Set to waiting
       await prisma.campaign.update({
         where: { id },
         data: {
           status: 'waiting',
           totalCount: await prisma.emailRecipient.count({ where: { campaignId: id } }),
-          sentAt: new Date(), // Track when it was queued
+          sentAt: new Date(),
         },
       });
-
-      return NextResponse.json({
-        message: 'A campaign is already running. This campaign has been added to the queue (WAITING).',
-        status: 'waiting'
-      });
+      return NextResponse.json({ message: 'Queued (Waiting)', status: 'waiting' });
     } else {
-      // START NOW: Set to sending and trigger worker
       await prisma.campaign.update({
         where: { id },
         data: {
@@ -175,18 +195,10 @@ export async function POST(
           sentAt: new Date(),
         },
       });
-
-      // Background the worker
       runCampaignWorker(id, baseUrl).catch(err => console.error('[Fatal Worker Error]', err));
-
-      return NextResponse.json({
-        message: 'Campaign sending started.',
-        status: 'sending'
-      });
+      return NextResponse.json({ message: 'Sending started', status: 'sending' });
     }
-
   } catch (err: any) {
-    console.error('[API Send Error]', err);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
