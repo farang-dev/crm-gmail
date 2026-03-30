@@ -82,24 +82,34 @@ export default function CampaignsPage() {
                   <td><span className={`badge badge-${c.status}`}>{c.status}</span></td>
                   <td>{c._count.emails}</td>
                   <td>{new Date(c.createdAt).toLocaleDateString()}</td>
-                  <td style={{ display: 'flex', gap: '0.5rem' }}>
-                    <Link href={`` + `/campaigns/${c.id}`} className="btn btn-secondary" style={{ padding: '0.25rem 0.5rem', height: 'auto', fontSize: '0.75rem' }}>
-                      View
-                    </Link>
-                    <Link 
-                      href={`` + `/campaigns/new?templateId=${c.id}`} 
-                      className="btn btn-secondary" 
-                      style={{ padding: '0.25rem 0.5rem', height: 'auto', fontSize: '0.75rem', backgroundColor: 'rgba(168, 85, 247, 0.1)', color: '#a855f7', borderColor: 'rgba(168, 85, 247, 0.2)' }}
-                    >
-                      Duplicate
-                    </Link>
-                    <button 
-                      className="btn btn-destructive" 
-                      style={{ padding: '0.25rem 0.5rem', height: 'auto', fontSize: '0.75rem' }}
-                      onClick={() => handleDelete(c.id)}
-                    >
-                      Delete
-                    </button>
+                  <td>
+                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                      <Link href={`/campaigns/${c.id}`} className="btn btn-secondary" style={{ padding: '0.25rem 0.5rem', height: 'auto', fontSize: '0.75rem' }}>
+                        View
+                      </Link>
+                      <Link 
+                        href={`/campaigns/new?templateId=${c.id}`} 
+                        className="btn btn-secondary" 
+                        style={{ padding: '0.25rem 0.5rem', height: 'auto', fontSize: '0.75rem', backgroundColor: 'rgba(168, 85, 247, 0.1)', color: '#a855f7', borderColor: 'rgba(168, 85, 247, 0.2)' }}
+                      >
+                        Duplicate
+                      </Link>
+                      {/* Resend button: shortcut to duplicate and send again */}
+                      <Link 
+                        href={`/campaigns/new?templateId=${c.id}&autoSend=true`} 
+                        className="btn btn-secondary" 
+                        style={{ padding: '0.25rem 0.5rem', height: 'auto', fontSize: '0.75rem', backgroundColor: 'rgba(34, 197, 94, 0.1)', color: 'var(--success)', borderColor: 'rgba(34, 197, 94, 0.2)' }}
+                      >
+                        Resend
+                      </Link>
+                      <button 
+                        className="btn btn-destructive" 
+                        style={{ padding: '0.25rem 0.5rem', height: 'auto', fontSize: '0.75rem' }}
+                        onClick={() => handleDelete(c.id)}
+                      >
+                        Delete
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))

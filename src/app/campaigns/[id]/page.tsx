@@ -35,6 +35,22 @@ export default function CampaignDetailsPage({
     });
   }, [resolvedParams.id]);
 
+  // Polling for active campaigns
+  useEffect(() => {
+    if (campaign?.status !== 'sending') return;
+
+    const timer = setInterval(() => {
+      fetch(`/api/campaigns/${resolvedParams.id}`)
+        .then(res => res.json())
+        .then(data => {
+          setCampaign(data);
+        })
+        .catch(err => console.error('Polling error:', err));
+    }, 5000);
+
+    return () => clearInterval(timer);
+  }, [campaign?.status, resolvedParams.id]);
+
   const handleSend = async () => {
     if (selectedContacts.size === 0) {
       alert('Select at least one contact to send to');
@@ -87,13 +103,44 @@ export default function CampaignDetailsPage({
       }
       
       if (res.ok) {
-        alert(data.message || 'Started sending');
         window.location.reload();
       } else {
         throw new Error(data.error || 'Failed to start sending');
       }
     } catch (err: any) {
       alert(`Error: ${err.message}`);
+      setSending(false);
+    }
+  };
+
+  const handleRetryFailed = async () => {
+    const failedIds = (campaign.emails || [])
+      .filter((e: any) => e.status === 'failed' && !(e.errorMsg || '').includes('550') && !(e.errorMsg || '').toLowerCase().includes('unknown'))
+      .map((e: any) => e.contactId);
+    
+    if (failedIds.length === 0) {
+      alert('No retryable failures found.');
+      return;
+    }
+
+    if (!confirm(`Retry sending to ${failedIds.length} failed recipients?`)) return;
+
+    setSending(true);
+    try {
+      const res = await fetch(`/api/campaigns/${resolvedParams.id}/send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contactIds: failedIds }),
+      });
+      if (res.ok) {
+        window.location.reload();
+      } else {
+        const data = await res.json();
+        alert(data.error || 'Failed to retry');
+        setSending(false);
+      }
+    } catch (err: any) {
+      alert(err.message);
       setSending(false);
     }
   };
@@ -136,15 +183,96 @@ export default function CampaignDetailsPage({
             {String(campaign?.status || 'DRAFT').toUpperCase()}
           </span>
         </div>
-        {(campaign.status === 'draft' || campaign.status === 'failed') && (
-          <button 
-            className="btn btn-secondary" 
-            onClick={() => router.push(`/campaigns/${resolvedParams.id}/edit`)}
-          >
-            Edit Content
-          </button>
-        )}
+        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+          {(campaign.status === 'draft' || campaign.status === 'failed') && (
+            <button 
+              className="btn btn-secondary" 
+              onClick={() => router.push(`/campaigns/${resolvedParams.id}/edit`)}
+            >
+              Edit Content
+            </button>
+          )}
+
+          {campaign.status === 'sending' && (
+            <button 
+              className="btn btn-destructive" 
+              onClick={async () => {
+                if (!confirm('Pause this campaign?')) return;
+                try {
+                  const res = await fetch(`/api/campaigns/${resolvedParams.id}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ status: 'waiting' }),
+                  });
+                  if (res.ok) window.location.reload();
+                } catch (err) {
+                  alert('Failed to pause');
+                }
+              }}
+            >
+              Pause Sending
+            </button>
+          )}
+
+          {(campaign.status === 'waiting' || campaign.status === 'failed') && (campaign.emails || []).some((e: any) => e.status === 'pending') && (
+            <button 
+              className="btn btn-primary" 
+              disabled={sending}
+              onClick={async () => {
+                const pendingIds = (campaign.emails || [])
+                  .filter((e: any) => e.status === 'pending')
+                  .map((e: any) => e.contactId);
+                
+                if (pendingIds.length === 0) return;
+                
+                setSending(true);
+                try {
+                  const res = await fetch(`/api/campaigns/${resolvedParams.id}/send`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ contactIds: pendingIds }),
+                  });
+                  if (res.ok) {
+                    window.location.reload();
+                  } else {
+                    const data = await res.json();
+                    alert(data.error || 'Failed to resume');
+                    setSending(false);
+                  }
+                } catch (err: any) {
+                  alert(err.message);
+                  setSending(false);
+                }
+              }}
+            >
+              {sending ? 'Starting...' : `Resume Sending (${(campaign.emails || []).filter((e: any) => e.status === 'pending').length} left)`}
+            </button>
+          )}
+        </div>
       </div>
+
+      {campaign.status === 'waiting' && (
+        <div style={{ 
+          backgroundColor: 'rgba(59, 130, 246, 0.1)', 
+          border: '1px solid var(--primary)', 
+          padding: '1rem', 
+          borderRadius: 'var(--radius)', 
+          marginBottom: '2rem',
+          fontSize: '0.875rem'
+        }}>
+          💡 <strong>Paused / Queued Mode</strong>: This campaign is currently on hold. This happens if:
+          <ul style={{ marginTop: '0.5rem', marginLeft: '1.5rem' }}>
+            <li>You reached your <strong>Daily Sending Limit</strong> in Settings.</li>
+            <li>Another campaign is currently being sent.</li>
+          </ul>
+          Please check your <strong>Settings</strong> to increase your limit or wait until tomorrow for the automatic reset.
+          {campaign.nextAvailableAt && (
+            <div style={{ marginTop: '1rem', padding: '0.75rem', backgroundColor: 'var(--primary)', color: 'var(--primary-foreground)', borderRadius: 'calc(var(--radius) - 2px)', fontWeight: 600 }}>
+              🚀 Next sending slot opens around: {new Date(campaign.nextAvailableAt).toLocaleString([], { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+            </div>
+          )}
+        </div>
+      )}
 
       <div style={{ marginBottom: '2rem', color: 'var(--muted-foreground)' }}>
         <span style={{ fontWeight: 600, color: 'var(--foreground)' }}>Subject:</span> {campaign.subject}
@@ -325,7 +453,19 @@ export default function CampaignDetailsPage({
         </div>
       ) : (
         <div className="card" style={{ marginBottom: '2rem' }}>
-          <h2 style={{ fontSize: '1.25rem', fontWeight: 600, marginBottom: '1rem' }}>Recipient Status</h2>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+            <h2 style={{ fontSize: '1.25rem', fontWeight: 600 }}>Recipient Status</h2>
+            {(campaign.emails || []).some((e: any) => e.status === 'failed' && !(e.errorMsg || '').includes('550') && !(e.errorMsg || '').toLowerCase().includes('unknown')) && (
+              <button 
+                className="btn btn-secondary" 
+                style={{ backgroundColor: 'rgba(59, 130, 246, 0.1)', color: 'var(--primary)', borderColor: 'rgba(59, 130, 246, 0.2)' }}
+                onClick={handleRetryFailed}
+                disabled={sending}
+              >
+                🔄 Retry All Non-Permanent Failures
+              </button>
+            )}
+          </div>
           
           {(campaign.emails || []).some((e: any) => (e.errorMsg || '').includes('550') || (e.errorMsg || '').toLowerCase().includes('unknown')) && (
             <div style={{ 

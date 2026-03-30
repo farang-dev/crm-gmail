@@ -19,6 +19,8 @@ export default function NewCampaignPage() {
     recipients: '',
   });
 
+  const isResend = searchParams.get('autoSend') === 'true';
+
   useEffect(() => {
     if (templateId) {
       fetch(`/api/campaigns/${templateId}`)
@@ -26,8 +28,10 @@ export default function NewCampaignPage() {
         .then(data => {
           setFormData(prev => ({
             ...prev,
+            name: isResend ? `${data.name} (Resent ${new Date().toLocaleDateString()})` : '',
             subject: data.subject || '',
             bodyHtml: data.bodyHtml || '',
+            recipients: isResend ? (data.emails || []).map((e: any) => e.contact?.email).filter(Boolean).join('\n') : '',
           }));
         })
         .catch(err => console.error('Failed to fetch template:', err))
@@ -83,7 +87,7 @@ export default function NewCampaignPage() {
   return (
     <div className="animate-fade-in" style={{ maxWidth: '800px', margin: '0 auto' }}>
       <div className="page-header">
-        <h1 className="page-title">New Campaign</h1>
+        <h1 className="page-title">{isResend ? 'Resend Campaign' : 'New Campaign'}</h1>
       </div>
 
       <div className="card">

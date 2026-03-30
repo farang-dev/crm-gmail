@@ -3,10 +3,13 @@ import { NextResponse } from 'next/server';
 
 // GET dashboard stats
 export async function GET() {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  const rolling24h = new Date();
+  rolling24h.setHours(rolling24h.getHours() - 24);
 
-  const [totalContacts, totalCampaigns, campaigns, sentToday, settings, stats] = await Promise.all([
+  const settings = await prisma.settings.findUnique({ where: { id: 'default' } });
+  const currentEmail = settings?.gmailAddress || '';
+
+  const [totalContacts, totalCampaigns, campaigns, sentToday, stats] = await Promise.all([
     prisma.contact.count(),
     prisma.campaign.count(),
     prisma.campaign.findMany({
@@ -25,12 +28,12 @@ export async function GET() {
     prisma.emailRecipient.count({
       where: {
         status: 'sent',
+        fromEmail: currentEmail, // Filter by current address!
         sentAt: {
-          gte: today,
+          gte: rolling24h,
         },
       },
     }),
-    prisma.settings.findUnique({ where: { id: 'default' } }),
     prisma.campaign.aggregate({
       _sum: {
         sentCount: true,
@@ -41,6 +44,19 @@ export async function GET() {
 
   const totalSent = stats._sum.sentCount || 0;
   const totalOpened = stats._sum.openCount || 0;
+
+  // Calculate NEXT AVAILABLE SLOT (Rolling 24h Window)
+  // Get the single oldest email sent in the last 24 hours (rolling24h already defined above)
+  const oldestEmailToday = await prisma.emailRecipient.findFirst({
+    where: { status: 'sent', sentAt: { gte: rolling24h } },
+    orderBy: { sentAt: 'asc' },
+    select: { sentAt: true }
+  });
+
+  let nextAvailableAt = null;
+  if (oldestEmailToday?.sentAt) {
+    nextAvailableAt = new Date(oldestEmailToday.sentAt.getTime() + 24 * 60 * 60 * 1000);
+  }
 
   const campaignStats = campaigns.map(c => {
     const sentEmails = c.emails.filter(e => e.status === 'sent').length;
@@ -69,6 +85,7 @@ export async function GET() {
     totalOpened,
     sentToday,
     dailyLimit: settings?.dailyLimit || 500,
+    nextAvailableAt,
     overallOpenRate: totalSent > 0 ? Math.round((totalOpened / totalSent) * 1000) / 10 : 0,
     campaigns: campaignStats,
   });

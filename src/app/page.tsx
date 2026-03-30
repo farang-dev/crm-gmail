@@ -10,6 +10,7 @@ interface DashboardStats {
   totalOpened: number;
   sentToday: number;
   dailyLimit: number;
+  nextAvailableAt: string | null;
   overallOpenRate: number;
   campaigns: {
     id: string;
@@ -64,7 +65,7 @@ export default function DashboardPage() {
         <StatCard title="Total Contacts" value={stats?.totalContacts || 0} color="var(--primary)" />
         <StatCard title="Total Campaigns" value={stats?.totalCampaigns || 0} color="#a855f7" />
         <StatCard 
-          title="Daily Limit Usage" 
+          title="Daily Limit (via this app)" 
           value={`${stats?.sentToday || 0} / ${stats?.dailyLimit || 500}`} 
           color={usagePercent > 80 ? 'var(--destructive)' : usagePercent > 50 ? 'var(--warning)' : 'var(--success)'}
           footer={
@@ -72,8 +73,13 @@ export default function DashboardPage() {
               <div style={{ width: '100%', height: '4px', backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: '2px', overflow: 'hidden' }}>
                 <div style={{ width: `${usagePercent}%`, height: '100%', backgroundColor: usagePercent > 80 ? 'var(--destructive)' : usagePercent > 50 ? 'var(--warning)' : 'var(--success)', transition: 'width 0.5s ease' }}></div>
               </div>
-              <div style={{ fontSize: '0.75rem', marginTop: '0.5rem', color: 'var(--muted-foreground)' }}>
-                {remainingToday} emails remaining today
+              <div style={{ fontSize: '0.65rem', marginTop: '0.5rem', color: 'var(--muted-foreground)', lineHeight: '1.3' }}>
+                {remainingToday} remaining. This only tracks emails sent via this app.
+                {stats?.nextAvailableAt && (
+                  <div style={{ color: 'var(--primary)', fontWeight: 600, marginTop: '0.25rem' }}>
+                    Next slot available around: {new Date(stats.nextAvailableAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </div>
+                )}
               </div>
             </div>
           }

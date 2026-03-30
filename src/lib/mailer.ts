@@ -29,6 +29,8 @@ export async function sendSingleEmail({
   trackingId,
   baseUrl,
   campaignId,
+  contactName,
+  contactCompany,
 }: {
   to: string;
   subject: string;
@@ -39,6 +41,8 @@ export async function sendSingleEmail({
   trackingId: string;
   baseUrl: string;
   campaignId?: string;
+  contactName?: string | null;
+  contactCompany?: string | null;
 }) {
   const { transporter } = await getTransporter();
 
@@ -51,29 +55,73 @@ export async function sendSingleEmail({
   console.log(`[SMTP DEBUG] Sending to: "${cleanTo}" | Hex: ${hex}`);
 
   // NO BS: Send the raw HTML from the editor exactly as it is.
-  // No extra wrappers, no forced fonts, no automatic styling.
   let finalHtml = html;
+  let finalText = text || subject.trim();
+  
+  const unsubscribeUrl = `${baseUrl}/unsubscribe/${trackingId}`;
+  const unSubFooter = `
+    <div style="margin-top: 50px; padding-top: 20px; border-top: 1px solid #eee; font-family: sans-serif; font-size: 12px; color: #999;">
+      You received this email from ${senderName || senderEmail}.<br>
+      <a href="${unsubscribeUrl}" style="color: #666; text-decoration: underline;">Unsubscribe from this list</a>
+    </div>
+  `;
+  const unSubTextFooter = `\n\n---\nTo unsubscribe, visit: ${unsubscribeUrl}`;
+
+  if (finalHtml.includes('{{unsubscribe}}')) {
+    finalHtml = finalHtml.replace(/\{\{unsubscribe\}\}/g, unsubscribeUrl);
+  } else {
+    finalHtml += unSubFooter;
+  }
+
+  if (finalText.includes('{{unsubscribe}}')) {
+    finalText = finalText.replace(/\{\{unsubscribe\}\}/g, unsubscribeUrl);
+  } else {
+    finalText += unSubTextFooter;
+  }
+  
+  // PERSONALIZATION (MERGE TAGS)
+  const replaceTags = (input: string) => {
+    return input
+      .replace(/\{\{name\}\}/g, contactName || 'there')
+      .replace(/\{\{company\}\}/g, contactCompany || 'your company');
+  };
+
+  finalHtml = replaceTags(finalHtml);
+  finalText = replaceTags(finalText);
+  const finalSubject = replaceTags(subject.trim());
   
   const isLocal = baseUrl.includes('localhost') || baseUrl.includes('127.0.0.1');
+  
   if (!isLocal) {
     const trackingPixel = `<img src="${baseUrl}/api/track/${trackingId}" width="1" height="1" style="display:none" alt="" />`;
-    finalHtml = html + trackingPixel;
+    finalHtml = finalHtml + trackingPixel;
   }
 
   const mailOptions: any = {
     from: senderName ? `"${senderName}" <${cleanFrom}>` : cleanFrom,
     to: cleanTo,
-    subject: subject.trim(),
+    subject: finalSubject,
     html: finalHtml,
-    text: text || subject.trim(), // CRITICAL: Missing text equivalent is a major spam trigger
+    text: finalText,
     headers: {
-      'X-Mailer': undefined, // Removed identifying bot header
+      'X-Mailer': undefined,
     },
   };
+
+  // Only add List-Unsubscribe if we have a public URL
+  if (!isLocal) {
+    mailOptions.headers['List-Unsubscribe'] = `<${unsubscribeUrl}>`;
+  }
 
   return transporter.sendMail(mailOptions);
 }
 
-export function sleep(ms: number) {
+/**
+ * Returns a randomized delay based on the base seconds to mimic human behavior (Jitter)
+ */
+export function sleep(seconds: number) {
+  // Add 80% to 150% jitter
+  const variance = 0.8 + Math.random() * 0.7; 
+  const ms = seconds * 1000 * variance;
   return new Promise(resolve => setTimeout(resolve, ms));
 }
